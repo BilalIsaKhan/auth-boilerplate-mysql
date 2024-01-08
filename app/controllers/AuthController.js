@@ -138,97 +138,69 @@ exports.logout = (req, res, next) => {
   }
 };
 
-exports.signUp = (req, res, next) => {
-  // const length = req.body.phoneNo.toString().length;
-  // if (length < 6 || length > 12) {
-  //   return res.status(422).json({
-  //     success: false,
-  //     message: "Number digits should be 6-12",
-  //   });
-  // }
-  // console.log("req is", req);
-  if (!req.body.password) {
-    return res.status(422).send({
-      success: false,
-      message: "Password must be provided",
-    });
-  }
+exports.signUp = async (req, res, next) => {
   try {
-    // console.log("try");
+    // if (!req.body.password) {
+    //   return res.status(422).send({
+    //     success: false,
+    //     message: "Password must be provided",
+    //   });
+    // }
+
     const { User } = req.db.models;
-    User.findOne({
+    const existingUser = await User.findOne({
       where: {
         email: req.body.email,
       },
-    })
-      .then(async (user) => {
-        if (!user) {
-          return (
-            bcrypt
-              .hash(req.body.password, 12)
-              .then(async (hashedPassword) => {
-                const token = await jwt.sign(
-                  {
-                    data: { email: req.body.email },
-                  },
-                  process.env.JWT_VERIFY_TOKEN,
-                  { expiresIn: `${process.env.VERIFY_TOKEN_EXPIRY}` }
-                );
+    });
 
-                const user = new User({
-                  email: req.body.email,
-                  fullName: req.body.fullName,
-                  password: hashedPassword,
-                  verificationToken: token,
-                  role_id: req.body.roleId,
-                });
-                return user.save();
-              })
-              // .then(async (result) => {
-              //   return res.status(200).send({
-              //     status: true,
-              //     message: "User created succcessfully.",
-              //   });
-              //   // console.log("token: " + token);
-              // })
-              .then(async (result) => {
-                //new ******************
-                const verificationLink = `${process.env.VERIFY_URL}/verify?verificationToken=${result.verificationToken}`;
-                console.log("Verification link is   ", verificationLink);
-                //new end***************
-                let emailResponse = await sendMail({
-                  from: '"Fred Foo :ghost:" <foo@example.com>', // sender address
-                  to: req.body.email, // list of receivers
-                  subject: "Verify Email", // Subject line
-                  text: "reset email", // plain text body
-                  //html: `<b>Verify email at <a href=${process.env.VERIFY_URL}/verify?verificationToken=${result.verificationToken}>Click Here to verify Email</a></b>`, // html body
-                  html: `<b>Verify email at <a href=${verificationLink}>Click Here to verify Email</a></b>`, // html body new
-                });
-                return res.status(200).send({
-                  status: true,
-                  message: "User created successfully.",
-                  testURI: emailResponse.testURI,
-                });
-              })
-          );
-        } else {
-          return res.status(400).send({
-            success: false,
-            message: "Email exists already, please pick a different one.",
-          });
-        }
-      })
-      .catch((err) => {
-        console.log(err);
-        return res
-          .status(400)
-          .send({ status: false, message: "Error creating user", err });
+    if (!existingUser) {
+      const hashedPassword = await bcrypt.hash(req.body.password, 12);
+      const token = await jwt.sign(
+        {
+          data: { email: req.body.email },
+        },
+        process.env.JWT_VERIFY_TOKEN,
+        { expiresIn: `${process.env.VERIFY_TOKEN_EXPIRY}` }
+      );
+
+      const newUser = new User({
+        email: req.body.email,
+        fullName: req.body.fullName,
+        password: hashedPassword,
+        verificationToken: token,
+        role_id: req.body.roleId,
       });
+
+      const result = await newUser.save();
+
+      const verificationLink = `${process.env.VERIFY_URL}/verify?verificationToken=${result.verificationToken}`;
+      console.log("Verification link is   ", verificationLink);
+
+      const emailResponse = await sendMail({
+        from: '"Fred Foo :ghost:" <foo@example.com>',
+        to: req.body.email,
+        subject: "Verify Email",
+        html: `<b>Verify email at <a href=${verificationLink}>Click Here to verify Email</a></b>`,
+      });
+
+      return res.status(200).send({
+        status: true,
+        message: "User created successfully.",
+        testURI: emailResponse.testURI,
+      });
+    } else {
+      return res.status(400).send({
+        success: false,
+        message: "Email exists already, please pick a different one.",
+      });
+    }
   } catch (error) {
-    // console.log("catch");
-    return res
-      .status(500)
-      .send({ status: false, message: "Internal Server Error" });
+    console.error(error);
+    return res.status(500).send({
+      status: false,
+      message: "Internal Server Error",
+    });
   }
 };
 
