@@ -139,13 +139,14 @@ exports.logout = (req, res, next) => {
 };
 
 exports.signUp = (req, res, next) => {
-  const length = req.body.phoneNo.toString().length;
-  if (length < 6 || length > 12) {
-    return res.status(422).json({
-      success: false,
-      message: "Number digits should be 6-12",
-    });
-  }
+  // const length = req.body.phoneNo.toString().length;
+  // if (length < 6 || length > 12) {
+  //   return res.status(422).json({
+  //     success: false,
+  //     message: "Number digits should be 6-12",
+  //   });
+  // }
+  // console.log("req is", req);
   if (!req.body.password) {
     return res.status(422).send({
       success: false,
@@ -153,44 +154,67 @@ exports.signUp = (req, res, next) => {
     });
   }
   try {
+    // console.log("try");
     const { User } = req.db.models;
     User.findOne({
       where: {
-        phoneNo: req.body.phoneNo,
+        email: req.body.email,
       },
     })
       .then(async (user) => {
         if (!user) {
-          return bcrypt
-            .hash(req.body.password, 12)
-            .then(async (hashedPassword) => {
-              const token = await jwt.sign(
-                {
-                  data: { email: req.body.phoneNo },
-                },
-                process.env.JWT_VERIFY_TOKEN,
-                { expiresIn: `${process.env.VERIFY_TOKEN_EXPIRY}` }
-              );
+          return (
+            bcrypt
+              .hash(req.body.password, 12)
+              .then(async (hashedPassword) => {
+                const token = await jwt.sign(
+                  {
+                    data: { email: req.body.email },
+                  },
+                  process.env.JWT_VERIFY_TOKEN,
+                  { expiresIn: `${process.env.VERIFY_TOKEN_EXPIRY}` }
+                );
 
-              const user = new User({
-                phoneNo: req.body.phoneNo,
-                password: hashedPassword,
-                verificationToken: token,
-                role_id: req.body.roleId,
-              });
-              user.save();
-            })
-            .then(async (result) => {
-              return res.status(200).send({
-                status: true,
-                message: "User created succcessfully.",
-              });
-            });
+                const user = new User({
+                  email: req.body.email,
+                  fullName: req.body.fullName,
+                  password: hashedPassword,
+                  verificationToken: token,
+                  role_id: req.body.roleId,
+                });
+                return user.save();
+              })
+              // .then(async (result) => {
+              //   return res.status(200).send({
+              //     status: true,
+              //     message: "User created succcessfully.",
+              //   });
+              //   // console.log("token: " + token);
+              // })
+              .then(async (result) => {
+                //new ******************
+                const verificationLink = `${process.env.VERIFY_URL}/verify?verificationToken=${result.verificationToken}`;
+                console.log("Verification link is   ", verificationLink);
+                //new end***************
+                let emailResponse = await sendMail({
+                  from: '"Fred Foo :ghost:" <foo@example.com>', // sender address
+                  to: req.body.email, // list of receivers
+                  subject: "Verify Email", // Subject line
+                  text: "reset email", // plain text body
+                  //html: `<b>Verify email at <a href=${process.env.VERIFY_URL}/verify?verificationToken=${result.verificationToken}>Click Here to verify Email</a></b>`, // html body
+                  html: `<b>Verify email at <a href=${verificationLink}>Click Here to verify Email</a></b>`, // html body new
+                });
+                return res.status(200).send({
+                  status: true,
+                  message: "User created successfully.",
+                  testURI: emailResponse.testURI,
+                });
+              })
+          );
         } else {
           return res.status(400).send({
             success: false,
-            message:
-              "Phone Number exists already, please pick a different one.",
+            message: "Email exists already, please pick a different one.",
           });
         }
       })
@@ -201,6 +225,7 @@ exports.signUp = (req, res, next) => {
           .send({ status: false, message: "Error creating user", err });
       });
   } catch (error) {
+    // console.log("catch");
     return res
       .status(500)
       .send({ status: false, message: "Internal Server Error" });
@@ -209,45 +234,41 @@ exports.signUp = (req, res, next) => {
 
 exports.accountVerify = async (req, res, next) => {
   try {
+    const { User } = req.db.models;
+    const { verificationToken } = req.query;
+    var decoded = await jwt.verify(
+      verificationToken,
+      process.env.JWT_VERIFY_TOKEN
+    );
     User.findOne({
       where: {
-        verificationToken: req.body.token,
+        email: decoded.data.email,
       },
     })
       .then(async (user) => {
-        if (user) {
+        if (user && user.verificationToken === verificationToken) {
           let result = await user.update({
             isVerified: true,
             verificationToken: null,
           });
           if (result) {
-            return res.status(200).send({
-              success: true,
-              message: "User Verified",
-            });
+            res.redirect(process.env.VERIFY_RETURN_URL_SUCCESS);
           } else {
-            return res.status(400).send({
-              success: false,
-              message: "User Couldn't Be Verifiey. Try again",
-            });
+            res.redirect(process.env.VERIFY_RETURN_URL_FAIL);
           }
         } else {
-          return res.status(400).send({
-            success: false,
-            message: "Wrong Verification OTP",
-          });
+          res.redirect(process.env.VERIFY_RETURN_URL_FAIL);
+          // res.status(200).send({ message:"Invalid token",status:false })
         }
       })
       .catch((err) => {
-        return res.status(400).send({
-          message: "Something went wrong with Verification",
-          success: false,
-        });
+        console.log(err);
       });
   } catch (err) {
+    console.log(err);
     return res
       .status(500)
-      .send({ success: false, message: "Internal Server Error" });
+      .send({ status: false, message: "Something went wrong", err });
   }
 };
 
